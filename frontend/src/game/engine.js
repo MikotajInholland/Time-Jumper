@@ -148,10 +148,13 @@ export function createEngine(canvas, callbacks = {}) {
   let replayPhysicsFrames = 0
   /** Wall ms at end of each physics frame (for server input timing + per-frame dt). */
   let frameBoundaryMs = []
+  /** Wall ms between physics steps (raw Δperformance.now); server uses for dt so replay matches integration. */
+  let frameStepMs = []
   let startT = 0
   let running = false
   let rafId  = null
-  let prevT  = 0
+  /** performance.now() at start of each frame — same clock as frameBoundaryMs for server replay. */
+  let prevFrameWallMs = 0
   let keys   = {}
   let jumpConsumed = false
   let offscreenCanvas = null
@@ -721,11 +724,14 @@ export function createEngine(canvas, callbacks = {}) {
 
   // ─────────────────────────────────────────────── game loop ───
 
-  function loop(timestamp) {
+  function loop() {
     if (!running) return
+    const wallNow = performance.now()
+    const rawStepMs = wallNow - prevFrameWallMs
+    prevFrameWallMs = wallNow
+    frameStepMs.push(Math.round(rawStepMs))
+    const dt = Math.min(rawStepMs / 1000, 0.05)
     replayPhysicsFrames++
-    const dt = Math.min((timestamp - prevT) / 1000, 0.05)
-    prevT = timestamp
 
     // ── Rotation: one apply per frame = mouse this interval + arrow from end of last frame ──
     const mousePart = pendingMouseRot
@@ -884,6 +890,7 @@ export function createEngine(canvas, callbacks = {}) {
           claimedTimeMs: ms,
           frameCount: replayPhysicsFrames,
           frameBoundaryMs: boundariesSnapshot,
+          frameStepMs: frameStepMs.slice(),
         },
         completionTimeMs: ms,
       })
@@ -993,10 +1000,11 @@ export function createEngine(canvas, callbacks = {}) {
     replay = []
     replayPhysicsFrames = 0
     frameBoundaryMs = []
+    frameStepMs = []
     jumpConsumed = false
     textures = textures || createPlaceholderTextures()
     startT = performance.now()
-    prevT  = startT
+    prevFrameWallMs = startT
     running = true
     keys = {}
     onTimeState('past')
