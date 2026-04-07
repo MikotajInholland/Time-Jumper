@@ -1,4 +1,8 @@
-# ⏳ Time Jumper
+
+![Recording2026-04-07184348-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/7c3a615f-0938-4e15-997f-d75fdfe17e0f)
+
+
+# Time Jumper
 
 Hey there! Welcome to **Time Jumper**. 
 
@@ -8,7 +12,7 @@ The game features a daily seed system (so everyone in the world plays the exact 
 
 ---
 
-## 🛠️ The Stack (Hows & Whys)
+## The Stack (Hows & Whys)
 
 This isn't just a simple game frontend; it's a complete full-stack application with strict server authority to prevent cheating. Here is what makes it tick and why I chose these tools:
 
@@ -32,7 +36,7 @@ While the game itself runs in an HTML `<canvas>`, the surrounding UI (menus, HUD
 
 ---
 
-## 🎮 Game Mechanics
+## Game Mechanics
 
 - **Procedural Generation:** Every day at midnight (UTC), a new seed is generated. The PHP backend and the JS frontend both use this seed to generate identical Past and Future maps. The generator is smart enough to guarantee that there is always a valid path to the goal.
 - **Time Swapping:** Hit `Shift` to swap timelines. The layout of walls and gaps will change. Use this to bypass walls or avoid falling into the void. Be careful: you can't swap if the other timeline doesn't have a floor beneath your feet!
@@ -40,7 +44,7 @@ While the game itself runs in an HTML `<canvas>`, the surrounding UI (menus, HUD
 
 ---
 
-## 🚀 Running the Project from Scratch (Docker)
+## Running the Project from Scratch (Docker)
 
 I've designed the environment so that **anyone** can clone this repository and get the entire stack running in a few minutes. You don't need PHP, Composer, Node, or MySQL installed on your host machine. 
 
@@ -70,7 +74,7 @@ docker-compose up --build -d
 ### Step 3: Play!
 Once the containers are healthy (give it a minute on the first build for `npm install` and `composer install` to finish), open your browser and go to:
 
-👉 **http://localhost**
+ **http://localhost**
 
 You can register an account, log in, and start playing. 
 
@@ -83,7 +87,7 @@ You can register an account, log in, and start playing.
 
 ---
 
-## ☁️ Deploying with a Cloud Database
+## Deploying with a Cloud Database
 
 If you want to host this online and use a managed database (like AWS RDS, PlanetScale, or Azure MySQL) instead of the local Docker MySQL container:
 
