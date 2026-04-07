@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="romanBar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c08a4f"/>
+      <stop offset="100%" stop-color="#81552f"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" fill="#4f3321"/>
+  <g fill="url(#romanBar)" stroke="#603d24" stroke-width="1">
+    <rect x="0" y="0" width="64" height="12"/>
+    <rect x="0" y="13" width="64" height="12"/>
+    <rect x="0" y="26" width="64" height="12"/>
+    <rect x="0" y="39" width="64" height="12"/>
+    <rect x="0" y="52" width="64" height="12"/>
+  </g>
+  <g stroke="#3c2414" stroke-width="1.2" opacity="0.85">
+    <line x1="10" y1="0" x2="10" y2="64"/>
+    <line x1="27" y1="0" x2="27" y2="64"/>
+    <line x1="44" y1="0" x2="44" y2="64"/>
+    <line x1="58" y1="0" x2="58" y2="64"/>
+  </g>
+</svg>

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="cp-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#123a2b"/>
+      <stop offset="100%" stop-color="#0a241a"/>
+    </linearGradient>
+    <radialGradient id="cp-core" cx="50%" cy="50%" r="45%">
+      <stop offset="0%" stop-color="#c9ffd8"/>
+      <stop offset="55%" stop-color="#58f08e"/>
+      <stop offset="100%" stop-color="#1db95f"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" fill="url(#cp-bg)"/>
+  <rect x="4" y="4" width="56" height="56" fill="none" stroke="#34d17d" stroke-width="2"/>
+  <g stroke="#1f7448" stroke-width="1.1" opacity="0.7">
+    <line x1="0" y1="16" x2="64" y2="16"/>
+    <line x1="0" y1="32" x2="64" y2="32"/>
+    <line x1="0" y1="48" x2="64" y2="48"/>
+    <line x1="16" y1="0" x2="16" y2="64"/>
+    <line x1="32" y1="0" x2="32" y2="64"/>
+    <line x1="48" y1="0" x2="48" y2="64"/>
+  </g>
+  <circle cx="32" cy="32" r="17" fill="none" stroke="#73ffae" stroke-width="3"/>
+  <circle cx="32" cy="32" r="9" fill="url(#cp-core)"/>
+  <path d="M32 19 L35.5 28.5 L46 29 L37.8 35.2 L40.8 45 L32 39.3 L23.2 45 L26.2 35.2 L18 29 L28.5 28.5 Z"
+        fill="#b9ffd1" opacity="0.38"/>
+</svg>
