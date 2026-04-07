@@ -1,9 +1,11 @@
 <?php
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
 
@@ -23,16 +25,32 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (Throwable $e, Request $request) {
-            if ($request->is('api/*') || $request->expectsJson()) {
-                $code = $e instanceof HttpException ? $e->getStatusCode() : 500;
-                $message = $e->getMessage();
-                if ($code === 500 && !config('app.debug')) {
-                    $message = 'Server error.';
-                }
-                return response()->json([
-                    'message' => $message,
-                    'exception' => config('app.debug') ? get_class($e) : null,
-                ], $code);
+            if (! ($request->is('api/*') || $request->expectsJson())) {
+                return null;
             }
+
+            if ($e instanceof ValidationException) {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'errors' => $e->errors(),
+                ], $e->status);
+            }
+
+            if ($e instanceof AuthenticationException) {
+                return response()->json([
+                    'message' => $e->getMessage() ?: 'Unauthenticated.',
+                ], 401);
+            }
+
+            $code = $e instanceof HttpException ? $e->getStatusCode() : 500;
+            $message = $e->getMessage();
+            if ($code === 500 && ! config('app.debug')) {
+                $message = 'Server error.';
+            }
+
+            return response()->json([
+                'message' => $message,
+                'exception' => config('app.debug') ? get_class($e) : null,
+            ], $code);
         });
     })->create();

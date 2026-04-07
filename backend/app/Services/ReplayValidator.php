@@ -11,7 +11,8 @@ namespace App\Services;
  *
  * Mouse yaw: [t_ms, "M", deltaRad] per client frame when the player moved the mouse.
  * frameCount: physics steps in the run (same as rAF ticks).
- * frameBoundaryMs (optional): wall ms at end of each frame — input flush uses these; physics dt is min(wallDelta, 0.05s) like engine.js.
+ * frameBoundaryMs (optional): wall ms at end of each frame — input flush uses these.
+ * frameStepMs (optional): wall ms between physics steps (same as engine’s raw Δperf before min(·,0.05)); when present, dt uses these so replay matches the client even if boundary rounding differs.
  */
 final class ReplayValidator
 {
@@ -258,7 +259,51 @@ final class ReplayValidator
             }
         }
 
-        return $this->simulate($past, $future, $sx, $sy, $events, $claimedTimeMs, $frameCount, $frameBoundaryMs);
+        $frameStepMs = null;
+        if (!empty($replay['frameStepMs'])) {
+            if ($frameBoundaryMs === null) {
+                return self::replayFail('FRAME_STEP_NEEDS_BOUNDARIES', 'frameStepMs requires frameBoundaryMs for input flush timing.', []);
+            }
+            if (!is_array($replay['frameStepMs'])) {
+                return self::replayFail('FRAME_STEP_NOT_ARRAY', 'frameStepMs must be an array when provided.', []);
+            }
+            if (count($replay['frameStepMs']) !== $frameCount) {
+                return self::replayFail('FRAME_STEP_COUNT_MISMATCH', 'frameStepMs must have exactly frameCount entries.', [
+                    'stepCount' => count($replay['frameStepMs']),
+                    'frameCount' => $frameCount,
+                ]);
+            }
+            $stepsNorm = [];
+            foreach ($replay['frameStepMs'] as $i => $s) {
+                if (!is_numeric($s)) {
+                    return self::replayFail('FRAME_STEP_NON_NUMERIC', 'Each frameStepMs entry must be numeric.', [
+                        'index' => $i,
+                    ]);
+                }
+                $si = (int) $s;
+                if ($si < 0 || $si > 600000) {
+                    return self::replayFail('FRAME_STEP_OUT_OF_RANGE', 'Each frameStepMs must be between 0 and 600000.', [
+                        'index' => $i,
+                        'value' => $si,
+                    ]);
+                }
+                $stepsNorm[] = $si;
+            }
+            $sumSteps = array_sum($stepsNorm);
+            $lastB = $frameBoundaryMs[$frameCount - 1];
+            // Steps sum to time through last frame *start*; last boundary is *end* of last frame (physics + draw).
+            $slack = max(400, $frameCount * 12);
+            if (abs($sumSteps - $lastB) > $slack) {
+                return self::replayFail('FRAME_STEP_SUM_MISMATCH', 'Sum of frameStepMs must be close to the last frameBoundaryMs (same wall clock as boundaries).', [
+                    'sumFrameStepMs' => $sumSteps,
+                    'lastBoundary' => $lastB,
+                    'allowedSlackMs' => $slack,
+                ]);
+            }
+            $frameStepMs = $stepsNorm;
+        }
+
+        return $this->simulate($past, $future, $sx, $sy, $events, $claimedTimeMs, $frameCount, $frameBoundaryMs, $frameStepMs);
     }
 
     /**
@@ -290,6 +335,7 @@ final class ReplayValidator
     /**
      * @param list<array{0: int, 1: string}|array{0: int, 1: 'M', 2: float}> $events
      * @param list<int>|null $frameBoundaryMs
+     * @param list<int>|null $frameStepMs raw wall ms per step (optional; overrides boundary deltas for dt)
      * @return array{ok: bool, code: string, message: string, context: array<string, mixed>}
      */
     private function simulate(
@@ -300,7 +346,8 @@ final class ReplayValidator
         array $events,
         int $claimedTimeMs,
         int $frameCount,
-        ?array $frameBoundaryMs
+        ?array $frameBoundaryMs,
+        ?array $frameStepMs = null
     ): array {
         $px = $sx;
         $py = $sy;
@@ -338,11 +385,19 @@ final class ReplayValidator
         for ($step = 0; $step < $frameCount; $step++) {
             if ($frameBoundaryMs !== null) {
                 $flushEnd = $frameBoundaryMs[$step];
-                $rawSec = ($frameBoundaryMs[$step] - $prevBoundary) / 1000.0;
-                if ($rawSec < 0.0) {
-                    $rawSec = 0.0;
+                if ($frameStepMs !== null) {
+                    $rawSec = $frameStepMs[$step] / 1000.0;
+                    if ($rawSec < 0.0) {
+                        $rawSec = 0.0;
+                    }
+                    $dt = min($rawSec, self::CLIENT_MAX_DT);
+                } else {
+                    $rawSec = ($frameBoundaryMs[$step] - $prevBoundary) / 1000.0;
+                    if ($rawSec < 0.0) {
+                        $rawSec = 0.0;
+                    }
+                    $dt = min($rawSec, self::CLIENT_MAX_DT);
                 }
-                $dt = min($rawSec, self::CLIENT_MAX_DT);
                 $prevBoundary = $frameBoundaryMs[$step];
             } else {
                 $flushEnd = (int) round(($step + 1) * $claimedTimeMs / $frameCount);
