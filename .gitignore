@@ -1,0 +1,93 @@
+# ==========================================
+# 1. DEPENDENCIES (The Heavy Lifters)
+# ==========================================
+# PHP Composer
+vendor/
+
+# JavaScript / Node.js
+node_modules/
+/.pnp
+.pnp.js
+
+# ==========================================
+# 2. ENVIRONMENT & SECRETS (Do Not Leak!)
+# ==========================================
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Allow the example file to be committed!
+!.env.example
+
+# Security keys and certificates
+*.pem
+*.key
+*.cert
+*.rsa
+*.p12
+
+# ==========================================
+# 3. LOGS & CACHE 
+# ==========================================
+# General Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+php_errors.log
+
+# Framework / Runtime Caches
+/.phpunit.cache
+.phpunit.result.cache
+/coverage/
+.eslintcache
+
+# ==========================================
+# 4. BUILD & COMPILED OUTPUT (Frontend)
+# ==========================================
+# If you ever use Webpack, Vite, React, etc.
+dist/
+build/
+/out/
+/.next/
+/.nuxt/
+/.vuepress/dist/
+
+# ==========================================
+# 5. OS GENERATED JUNK (Mac / Windows)
+# ==========================================
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+desktop.ini
+$RECYCLE.BIN/
+
+# ==========================================
+# 6. IDEs & EDITORS
+# ==========================================
+# PhpStorm / IntelliJ / WebStorm
+/.idea/
+*.iml
+*.iws
+
+# VS Code
+/.vscode/
+*.code-workspace
+
+# Vim / Emacs backup files
+*~
+*.swp
+*.swo
