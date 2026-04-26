@@ -12,7 +12,7 @@ namespace App\Services;
  * Mouse yaw: [t_ms, "M", deltaRad] per client frame when the player moved the mouse.
  * frameCount: physics steps in the run (same as rAF ticks).
  * frameBoundaryMs (optional): wall ms at end of each frame — input flush uses these.
- * frameStepMs (optional): wall ms between physics steps (same as engine’s raw Δperf before min(·,0.05)); when present, dt uses these so replay matches the client even if boundary rounding differs.
+ * frameStepMs (optional): ms between rAF starts (raw performance.now delta); dt = min(ms/1000, 0.05). When present, goal time check allows wall-clock claimedTimeMs above simulated Σdt (in-frame work each tick).
  */
 final class ReplayValidator
 {
@@ -20,8 +20,14 @@ final class ReplayValidator
 
     private const MAX_TIME_DRIFT_MS = 10000;
 
-    /** Residual float / uniform-dt vs variable client dt per step. */
+    /** Residual float / uniform-dt vs variable client dt per step (no frameStepMs replay). */
     private const TIME_TOLERANCE_MS = 500;
+
+    /**
+     * When frameStepMs is used, claimedTimeMs is wall-clock at goal while simulated time sums only
+     * rAF start-to-start gaps; each frame omits in-frame work (~few ms), so allow ~this much slack per frame.
+     */
+    private const WALL_PHYSICS_SLACK_PER_FRAME_MS = 20;
 
     private const MAX_MOUSE_DELTA_RAD = 3.0;
 
@@ -239,7 +245,17 @@ final class ReplayValidator
                 $prev = $bi;
             }
             $lastB = $norm[$frameCount - 1];
-            if (abs($lastB - $claimedTimeMs) > 25) {
+            $hasFrameSteps = !empty($replay['frameStepMs']) && is_array($replay['frameStepMs'])
+                && count($replay['frameStepMs']) === $frameCount;
+            if ($hasFrameSteps) {
+                // Wall last boundary can exceed claimedTimeMs when claimed is physics-aligned; claimed cannot be long after wall.
+                if ($claimedTimeMs > $lastB + 50 || $claimedTimeMs < $lastB - max(3000, $frameCount * 25)) {
+                    return self::replayFail('BOUNDARY_CLAIMED_MISMATCH', 'claimedTimeMs is not consistent with the last frame boundary.', [
+                        'lastBoundary' => $lastB,
+                        'claimedTimeMs' => $claimedTimeMs,
+                    ]);
+                }
+            } elseif (abs($lastB - $claimedTimeMs) > 25) {
                 return self::replayFail('BOUNDARY_CLAIMED_MISMATCH', 'Last boundary must match claimedTimeMs (same wall clock as finish).', [
                     'lastBoundary' => $lastB,
                     'claimedTimeMs' => $claimedTimeMs,
@@ -280,14 +296,14 @@ final class ReplayValidator
                         'index' => $i,
                     ]);
                 }
-                $si = (int) $s;
-                if ($si < 0 || $si > 600000) {
+                $sf = (float) $s;
+                if (!is_finite($sf) || $sf < 0.0 || $sf > 600000.0) {
                     return self::replayFail('FRAME_STEP_OUT_OF_RANGE', 'Each frameStepMs must be between 0 and 600000.', [
                         'index' => $i,
-                        'value' => $si,
+                        'value' => $s,
                     ]);
                 }
-                $stepsNorm[] = $si;
+                $stepsNorm[] = $sf;
             }
             $sumSteps = array_sum($stepsNorm);
             $lastB = $frameBoundaryMs[$frameCount - 1];
@@ -335,7 +351,7 @@ final class ReplayValidator
     /**
      * @param list<array{0: int, 1: string}|array{0: int, 1: 'M', 2: float}> $events
      * @param list<int>|null $frameBoundaryMs
-     * @param list<int>|null $frameStepMs raw wall ms per step (optional; overrides boundary deltas for dt)
+     * @param list<float>|null $frameStepMs ms between rAF starts per step (optional; overrides boundary deltas for dt)
      * @return array{ok: bool, code: string, message: string, context: array<string, mixed>}
      */
     private function simulate(
@@ -386,7 +402,7 @@ final class ReplayValidator
             if ($frameBoundaryMs !== null) {
                 $flushEnd = $frameBoundaryMs[$step];
                 if ($frameStepMs !== null) {
-                    $rawSec = $frameStepMs[$step] / 1000.0;
+                    $rawSec = ((float) $frameStepMs[$step]) / 1000.0;
                     if ($rawSec < 0.0) {
                         $rawSec = 0.0;
                     }
@@ -490,18 +506,41 @@ final class ReplayValidator
             $onGoal = $this->cellAt($current, $px, $py) === self::CELL_GOAL || $touchedGoalThisStep;
             if ($onGoal) {
                 $finishMs = $simSec * 1000.0;
-                if (abs($finishMs - $claimedTimeMs) <= self::TIME_TOLERANCE_MS) {
-                    return self::replayOk();
+                if ($frameStepMs !== null) {
+                    // claimedTimeMs is wall-clock at goal; simulated time sums only rAF start-to-start gaps (frameStepMs).
+                    $wallPhysicsSlack = max(2500, (int) ($frameCount * self::WALL_PHYSICS_SLACK_PER_FRAME_MS));
+                    if ($claimedTimeMs + 1.0 < $finishMs - self::TIME_TOLERANCE_MS) {
+                        return self::replayFail('TIME_MISMATCH', 'claimedTimeMs is faster than simulated goal time beyond tolerance (possible tampering).', [
+                            'claimedTimeMs' => $claimedTimeMs,
+                            'simulatedFinishMs' => round($finishMs, 3),
+                            'deltaMs' => round($finishMs - $claimedTimeMs, 3),
+                            'toleranceMs' => self::TIME_TOLERANCE_MS,
+                            'frameIndex' => $step,
+                            'frameCount' => $frameCount,
+                        ]);
+                    }
+                    if ($claimedTimeMs > $finishMs + $wallPhysicsSlack) {
+                        return self::replayFail('TIME_MISMATCH', 'claimedTimeMs is too far above simulated physics time (wall clock vs integration mismatch).', [
+                            'claimedTimeMs' => $claimedTimeMs,
+                            'simulatedFinishMs' => round($finishMs, 3),
+                            'deltaMs' => round($finishMs - $claimedTimeMs, 3),
+                            'allowedWallPhysicsSlackMs' => $wallPhysicsSlack,
+                            'frameIndex' => $step,
+                            'frameCount' => $frameCount,
+                        ]);
+                    }
+                } elseif (abs($finishMs - $claimedTimeMs) > self::TIME_TOLERANCE_MS) {
+                    return self::replayFail('TIME_MISMATCH', 'Simulated goal time does not match claimedTimeMs within tolerance.', [
+                        'claimedTimeMs' => $claimedTimeMs,
+                        'simulatedFinishMs' => round($finishMs, 3),
+                        'deltaMs' => round($finishMs - $claimedTimeMs, 3),
+                        'toleranceMs' => self::TIME_TOLERANCE_MS,
+                        'frameIndex' => $step,
+                        'frameCount' => $frameCount,
+                    ]);
                 }
 
-                return self::replayFail('TIME_MISMATCH', 'Simulated goal time does not match claimedTimeMs within tolerance.', [
-                    'claimedTimeMs' => $claimedTimeMs,
-                    'simulatedFinishMs' => round($finishMs, 3),
-                    'deltaMs' => round($finishMs - $claimedTimeMs, 3),
-                    'toleranceMs' => self::TIME_TOLERANCE_MS,
-                    'frameIndex' => $step,
-                    'frameCount' => $frameCount,
-                ]);
+                return self::replayOk();
             }
         }
 

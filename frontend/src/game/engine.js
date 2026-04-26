@@ -148,7 +148,7 @@ export function createEngine(canvas, callbacks = {}) {
   let replayPhysicsFrames = 0
   /** Wall ms at end of each physics frame (for server input timing + per-frame dt). */
   let frameBoundaryMs = []
-  /** Wall ms between physics steps (raw Δperformance.now); server uses for dt so replay matches integration. */
+  /** Ms between rAF starts (same float as dt·1000 before cap); server replays with identical dt. */
   let frameStepMs = []
   let startT = 0
   let running = false
@@ -729,7 +729,7 @@ export function createEngine(canvas, callbacks = {}) {
     const wallNow = performance.now()
     const rawStepMs = wallNow - prevFrameWallMs
     prevFrameWallMs = wallNow
-    frameStepMs.push(Math.round(rawStepMs))
+    frameStepMs.push(rawStepMs)
     const dt = Math.min(rawStepMs / 1000, 0.05)
     replayPhysicsFrames++
 

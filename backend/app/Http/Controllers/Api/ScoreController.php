@@ -30,7 +30,7 @@ class ScoreController extends Controller
                 'replay.frameBoundaryMs' => 'sometimes|nullable|array|max:120000',
                 'replay.frameBoundaryMs.*' => 'integer|min:0|max:600000',
                 'replay.frameStepMs' => 'sometimes|nullable|array|max:120000',
-                'replay.frameStepMs.*' => 'integer|min:0|max:600000',
+                'replay.frameStepMs.*' => 'numeric|min:0|max:600000',
                 'seed' => 'required|integer',
             ]);
         } catch (ValidationException $e) {
