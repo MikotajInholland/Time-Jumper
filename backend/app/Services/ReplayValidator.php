@@ -23,12 +23,6 @@ final class ReplayValidator
     /** Residual float / uniform-dt vs variable client dt per step (no frameStepMs replay). */
     private const TIME_TOLERANCE_MS = 500;
 
-    /**
-     * When frameStepMs is used, claimedTimeMs is wall-clock at goal while simulated time sums only
-     * rAF start-to-start gaps; each frame omits in-frame work (~few ms), so allow ~this much slack per frame.
-     */
-    private const WALL_PHYSICS_SLACK_PER_FRAME_MS = 20;
-
     private const MAX_MOUSE_DELTA_RAD = 3.0;
 
     private const MAX_PHYSICS_FRAMES = 120000;
@@ -507,24 +501,14 @@ final class ReplayValidator
             if ($onGoal) {
                 $finishMs = $simSec * 1000.0;
                 if ($frameStepMs !== null) {
-                    // claimedTimeMs is wall-clock at goal; simulated time sums only rAF start-to-start gaps (frameStepMs).
-                    $wallPhysicsSlack = max(2500, (int) ($frameCount * self::WALL_PHYSICS_SLACK_PER_FRAME_MS));
+                    // claimedTimeMs is wall-clock at goal, while simulated time is capped physics time.
+                    // A slower wall-clock claim is not an advantage; only reject claims that are too fast.
                     if ($claimedTimeMs + 1.0 < $finishMs - self::TIME_TOLERANCE_MS) {
                         return self::replayFail('TIME_MISMATCH', 'claimedTimeMs is faster than simulated goal time beyond tolerance (possible tampering).', [
                             'claimedTimeMs' => $claimedTimeMs,
                             'simulatedFinishMs' => round($finishMs, 3),
                             'deltaMs' => round($finishMs - $claimedTimeMs, 3),
                             'toleranceMs' => self::TIME_TOLERANCE_MS,
-                            'frameIndex' => $step,
-                            'frameCount' => $frameCount,
-                        ]);
-                    }
-                    if ($claimedTimeMs > $finishMs + $wallPhysicsSlack) {
-                        return self::replayFail('TIME_MISMATCH', 'claimedTimeMs is too far above simulated physics time (wall clock vs integration mismatch).', [
-                            'claimedTimeMs' => $claimedTimeMs,
-                            'simulatedFinishMs' => round($finishMs, 3),
-                            'deltaMs' => round($finishMs - $claimedTimeMs, 3),
-                            'allowedWallPhysicsSlackMs' => $wallPhysicsSlack,
                             'frameIndex' => $step,
                             'frameCount' => $frameCount,
                         ]);
