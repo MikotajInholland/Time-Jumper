@@ -497,7 +497,7 @@ final class ReplayValidator
 
             $simSec += $dt;
 
-            $onGoal = $this->cellAt($current, $px, $py) === self::CELL_GOAL || $touchedGoalThisStep;
+            $onGoal = $this->circleTouchesGoalCell($current, $px, $py) || $touchedGoalThisStep;
             if ($onGoal) {
                 $finishMs = $simSec * 1000.0;
                 if ($frameStepMs !== null) {
@@ -530,7 +530,7 @@ final class ReplayValidator
 
         $cell = $this->cellAt($current, $px, $py);
 
-        return self::replayFail('GOAL_NOT_REACHED', 'Simulation finished without the player center or movement path crossing a goal tile.', [
+        return self::replayFail('GOAL_NOT_REACHED', 'Simulation finished without the player making contact with a goal tile.', [
             'px' => round($px, 4),
             'py' => round($py, 4),
             'cellType' => $cell,
@@ -846,32 +846,114 @@ final class ReplayValidator
     }
 
     /**
-     * True if the segment (axis slide leg) passes through any GOAL cell.
-     * Matches fast movement: the client wins on the frame the center hits goal, but server/client
-     * drift can end the step beside the tile while the path still crossed it.
+     * True if the player's swept circle touches any GOAL cell during an axis slide leg.
      *
      * @param array<int, int[]> $map
      */
     private function segmentTouchesGoalCell(array $map, float $x0, float $y0, float $x1, float $y1): bool
     {
-        $dx = $x1 - $x0;
-        $dy = $y1 - $y0;
-        $dist = hypot($dx, $dy);
-        if ($dist < 1e-8) {
-            return $this->cellAt($map, $x0, $y0) === self::CELL_GOAL;
-        }
-        $steps = (int) max(2, min(64, 2 + (int) ceil($dist / 0.12)));
+        $pad = self::RADIUS;
+        $minX = (int) floor(min($x0, $x1) - $pad);
+        $maxX = (int) ceil(max($x0, $x1) + $pad);
+        $minY = (int) floor(min($y0, $y1) - $pad);
+        $maxY = (int) ceil(max($y0, $y1) + $pad);
 
-        for ($i = 0; $i <= $steps; $i++) {
-            $t = $i / $steps;
-            $x = $x0 + $dx * $t;
-            $y = $y0 + $dy * $t;
-            if ($this->cellAt($map, $x, $y) === self::CELL_GOAL) {
-                return true;
+        for ($cy = $minY; $cy <= $maxY; $cy++) {
+            for ($cx = $minX; $cx <= $maxX; $cx++) {
+                if ($this->cellAt($map, $cx, $cy) !== self::CELL_GOAL) {
+                    continue;
+                }
+                if ($this->segmentIntersectsExpandedCell($x0, $y0, $x1, $y1, $cx, $cy, $pad)) {
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    /**
+     * @param array<int, int[]> $map
+     */
+    private function circleTouchesGoalCell(array $map, float $x, float $y): bool
+    {
+        $r = self::RADIUS;
+        $r2 = $r * $r;
+        $x0 = (int) floor($x - $r);
+        $x1 = (int) ceil($x + $r);
+        $y0 = (int) floor($y - $r);
+        $y1 = (int) ceil($y + $r);
+
+        for ($cy = $y0; $cy <= $y1; $cy++) {
+            for ($cx = $x0; $cx <= $x1; $cx++) {
+                if ($this->cellAt($map, $cx, $cy) !== self::CELL_GOAL) {
+                    continue;
+                }
+                $nearX = max($cx, min($x, $cx + 1));
+                $nearY = max($cy, min($y, $cy + 1));
+                $dx = $x - $nearX;
+                $dy = $y - $nearY;
+                if ($dx * $dx + $dy * $dy <= $r2) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function segmentIntersectsExpandedCell(
+        float $x0,
+        float $y0,
+        float $x1,
+        float $y1,
+        int $cx,
+        int $cy,
+        float $pad
+    ): bool {
+        $minX = $cx - $pad;
+        $maxX = $cx + 1 + $pad;
+        $minY = $cy - $pad;
+        $maxY = $cy + 1 + $pad;
+        $tMin = 0.0;
+        $tMax = 1.0;
+        $dx = $x1 - $x0;
+        $dy = $y1 - $y0;
+
+        if (abs($dx) < 1e-8) {
+            if ($x0 < $minX || $x0 > $maxX) {
+                return false;
+            }
+        } else {
+            $inv = 1.0 / $dx;
+            $t1 = ($minX - $x0) * $inv;
+            $t2 = ($maxX - $x0) * $inv;
+            if ($t1 > $t2) {
+                [$t1, $t2] = [$t2, $t1];
+            }
+            $tMin = max($tMin, $t1);
+            $tMax = min($tMax, $t2);
+            if ($tMin > $tMax) {
+                return false;
+            }
+        }
+
+        if (abs($dy) < 1e-8) {
+            if ($y0 < $minY || $y0 > $maxY) {
+                return false;
+            }
+        } else {
+            $inv = 1.0 / $dy;
+            $t1 = ($minY - $y0) * $inv;
+            $t2 = ($maxY - $y0) * $inv;
+            if ($t1 > $t2) {
+                [$t1, $t2] = [$t2, $t1];
+            }
+            $tMin = max($tMin, $t1);
+            $tMax = min($tMax, $t2);
+        }
+
+        return $tMin <= $tMax;
     }
 
     /**

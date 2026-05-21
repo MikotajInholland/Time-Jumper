@@ -44,6 +44,9 @@ const JUMP_OBS_CLEAR_Z = 0.38
 
 // Render
 const FLOOR_SCALE = 4          // 1 pixel = 4x4 block on screen (retro floor) for performance
+const MAX_RENDER_WIDTH = 960   // cap internal resolution so rAF can track high-refresh displays
+const MAX_RENDER_HEIGHT = 540
+const WALL_RAY_STEP = 2        // cast fewer columns, then stretch strips for smoother frame pacing
 const MAX_DIST    = 24
 const HORIZON_SCALE = 0.30
 const PLANE_BASE  = 0.70      // camera plane length → ~70° FOV (standard)
@@ -229,6 +232,71 @@ export function createEngine(canvas, callbacks = {}) {
     return false
   }
 
+  function circleTouchesCell(map, x, y, targetCell) {
+    const r = RADIUS
+    const r2 = r * r
+    const x0 = Math.floor(x - r), x1 = Math.ceil(x + r)
+    const y0 = Math.floor(y - r), y1 = Math.ceil(y + r)
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        if (cellAt(map, cx, cy) !== targetCell) continue
+        const nearX = Math.max(cx, Math.min(x, cx + 1))
+        const nearY = Math.max(cy, Math.min(y, cy + 1))
+        const dx = x - nearX, dy = y - nearY
+        if (dx * dx + dy * dy <= r2) return true
+      }
+    }
+    return false
+  }
+
+  function segmentIntersectsExpandedCell(x0, y0, x1, y1, cx, cy, pad) {
+    const minX = cx - pad, maxX = cx + 1 + pad
+    const minY = cy - pad, maxY = cy + 1 + pad
+    let tMin = 0, tMax = 1
+    const dx = x1 - x0
+    const dy = y1 - y0
+
+    if (Math.abs(dx) < 1e-8) {
+      if (x0 < minX || x0 > maxX) return false
+    } else {
+      const inv = 1 / dx
+      let t1 = (minX - x0) * inv
+      let t2 = (maxX - x0) * inv
+      if (t1 > t2) [t1, t2] = [t2, t1]
+      tMin = Math.max(tMin, t1)
+      tMax = Math.min(tMax, t2)
+      if (tMin > tMax) return false
+    }
+
+    if (Math.abs(dy) < 1e-8) {
+      if (y0 < minY || y0 > maxY) return false
+    } else {
+      const inv = 1 / dy
+      let t1 = (minY - y0) * inv
+      let t2 = (maxY - y0) * inv
+      if (t1 > t2) [t1, t2] = [t2, t1]
+      tMin = Math.max(tMin, t1)
+      tMax = Math.min(tMax, t2)
+    }
+
+    return tMin <= tMax
+  }
+
+  function movementTouchesCell(map, x0, y0, x1, y1, targetCell) {
+    const pad = RADIUS
+    const minX = Math.floor(Math.min(x0, x1) - pad)
+    const maxX = Math.ceil(Math.max(x0, x1) + pad)
+    const minY = Math.floor(Math.min(y0, y1) - pad)
+    const maxY = Math.ceil(Math.max(y0, y1) + pad)
+    for (let cy = minY; cy <= maxY; cy++) {
+      for (let cx = minX; cx <= maxX; cx++) {
+        if (cellAt(map, cx, cy) !== targetCell) continue
+        if (segmentIntersectsExpandedCell(x0, y0, x1, y1, cx, cy, pad)) return true
+      }
+    }
+    return false
+  }
+
   function recordInput(key) {
     if (!running) return
     replay.push([Math.round(performance.now() - startT), key])
@@ -281,8 +349,11 @@ export function createEngine(canvas, callbacks = {}) {
   // ─────────────────────────────────────────────────────── resize ───
 
   function resize() {
-    W = canvas.width  = canvas.clientWidth
-    H = canvas.height = canvas.clientHeight
+    const cssW = Math.max(1, canvas.clientWidth | 0)
+    const cssH = Math.max(1, canvas.clientHeight | 0)
+    const renderScale = Math.min(1, MAX_RENDER_WIDTH / cssW, MAX_RENDER_HEIGHT / cssH)
+    W = canvas.width = Math.max(1, Math.round(cssW * renderScale))
+    H = canvas.height = Math.max(1, Math.round(cssH * renderScale))
     
     // Low-res floor buffer
     const fW = Math.ceil(W / FLOOR_SCALE)
@@ -600,10 +671,10 @@ export function createEngine(canvas, callbacks = {}) {
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(floorCanvas, 0, 0, W, H)
 
-    // ── 3. WALLS (High-Res) ──────────────────────────────────────────────────────────
-    // Cast 1 ray per pixel column
-    for (let x = 0; x < W; x++) {
-      const cameraX = 2 * x / W - 1
+    // ── 3. WALLS ──────────────────────────────────────────────────────────
+    for (let x = 0; x < W; x += WALL_RAY_STEP) {
+      const stripW = Math.min(WALL_RAY_STEP, W - x)
+      const cameraX = 2 * (x + stripW * 0.5) / W - 1
       const rdx = dirX + planeX * cameraX
       const rdy = dirY + planeY * cameraX
       
@@ -633,7 +704,7 @@ export function createEngine(canvas, callbacks = {}) {
         else                                   tex = textures.futureWall
 
         const texX = Math.min(TEX_SIZE - 1, (wallX * TEX_SIZE) | 0)
-        ctx.drawImage(tex, texX, 0, 1, TEX_SIZE, x, top, 1, height)
+        ctx.drawImage(tex, texX, 0, 1, TEX_SIZE, x, top, stripW, height)
 
         const hitX = px + rdx * dist
         const hitY = py + rdy * dist
@@ -641,39 +712,39 @@ export function createEngine(canvas, callbacks = {}) {
         const darken = 1 - Math.min(1, light.brightness)
         if (darken > 0.02) {
           ctx.fillStyle = `rgba(0,0,0,${darken.toFixed(3)})`
-          ctx.fillRect(x, top, 1, height)
+          ctx.fillRect(x, top, stripW, height)
         }
         const glow = Math.max(0, light.brightness - 1)
         if (glow > 0.02) {
           const a = Math.min(0.35, glow * 0.45)
           const [lr, lg, lb] = light.tint
           ctx.fillStyle = `rgba(${lr},${lg},${lb},${a.toFixed(3)})`
-          ctx.fillRect(x, top, 1, height)
+          ctx.fillRect(x, top, stripW, height)
         }
 
         // Shadow side: darken walls hit on the Y axis
         if (side === 1) {
           ctx.fillStyle = 'rgba(0,0,0,0.35)'
-          ctx.fillRect(x, top, 1, height)
+          ctx.fillRect(x, top, stripW, height)
         }
 
         // Fog overlay
         const fogT = Math.max(0, 1 - Math.exp(-dist * 0.09))
         if (fogT > 0.02) {
           ctx.fillStyle = `rgba(${fog[0]},${fog[1]},${fog[2]},${fogT.toFixed(3)})`
-          ctx.fillRect(x, top, 1, height)
+          ctx.fillRect(x, top, stripW, height)
         }
 
         // Goal glow edges
         if (cellType === CELL_GOAL) {
           ctx.fillStyle = 'rgba(255,240,60,0.55)'
-          ctx.fillRect(x, top, 1, Math.min(4, height))
-          ctx.fillRect(x, drawBottom - 4, 1, 4)
+          ctx.fillRect(x, top, stripW, Math.min(4, height))
+          ctx.fillRect(x, drawBottom - 4, stripW, 4)
         }
         // Checkpoint glow edge
         if (cellType === CELL_CHECKPOINT) {
           ctx.fillStyle = 'rgba(80,255,160,0.50)'
-          ctx.fillRect(x, top, 1, Math.min(4, height))
+          ctx.fillRect(x, top, stripW, Math.min(4, height))
         }
       }
     }
@@ -803,12 +874,19 @@ export function createEngine(canvas, callbacks = {}) {
     if (Math.hypot(vx, vy) < 0.003) { vx = 0; vy = 0 }
 
     // Wall sliding (separate X and Y)
+    let touchedGoalThisFrame = circleTouchesCell(currentMap, px, py, CELL_GOAL)
+    const prevX = px
+    const prevY = py
     const nx = px + vx * dt
     const ny = py + vy * dt
-    if (!circleHitsWall(currentMap, nx, py)) px = nx
-    else vx = 0
-    if (!circleHitsWall(currentMap, px, ny)) py = ny
-    else vy = 0
+    if (!circleHitsWall(currentMap, nx, py)) {
+      touchedGoalThisFrame = touchedGoalThisFrame || movementTouchesCell(currentMap, prevX, prevY, nx, prevY, CELL_GOAL)
+      px = nx
+    } else vx = 0
+    if (!circleHitsWall(currentMap, px, ny)) {
+      touchedGoalThisFrame = touchedGoalThisFrame || movementTouchesCell(currentMap, px, prevY, px, ny, CELL_GOAL)
+      py = ny
+    } else vy = 0
 
     // ── Unsafe floor (pit / wrong timeline tile / obstacle) ──
     if (respawnGraceT > 0) {
@@ -878,7 +956,7 @@ export function createEngine(canvas, callbacks = {}) {
     if (c === CELL_CHECKPOINT) {
       lastCP = { x: px, y: py, era: currentMap === mapPast ? 'past' : 'future' }
     }
-    if (c === CELL_GOAL) {
+    if (c === CELL_GOAL || touchedGoalThisFrame || circleTouchesCell(currentMap, px, py, CELL_GOAL)) {
       running = false
       const ms = wallMs
       onTimeMs(ms)
@@ -910,10 +988,22 @@ export function createEngine(canvas, callbacks = {}) {
 
   const inputMap = {
     w: 'F', ArrowUp: 'F', s: 'B', ArrowDown: 'B',
-    a: 'SL', d: 'SR', // A/D Strafe
+    a: 'SL', q: 'SL', d: 'SR', e: 'SR', // A/D and Q/E strafe
     ArrowLeft: 'L', ArrowRight: 'R', // Arrows Turn
     ' ': 'J',
   }
+
+  const replayCodeKeys = {
+    F: ['w', 'ArrowUp'],
+    B: ['s', 'ArrowDown'],
+    SL: ['a', 'q'],
+    SR: ['d', 'e'],
+    L: ['ArrowLeft'],
+    R: ['ArrowRight'],
+    J: [' '],
+    SC: ['Control'],
+  }
+  let replayHeld = {}
 
   function mouseMove(e) {
     if (!running || !document.pointerLockElement) return
@@ -924,12 +1014,13 @@ export function createEngine(canvas, callbacks = {}) {
   function keyDown(e) {
     if (e.key === 'Control') {
       e.preventDefault()
-      recordInput('SC')
       keys[e.key] = true
+      setReplayHeld('SC', true)
       return
     }
     if (e.key === 'Shift') {
       e.preventDefault()
+      if (keys[e.key]) return
       const nextMap = currentMap === mapPast ? mapFuture : mapPast
       if (!isWalkable(nextMap, px, py)) {
         triggerWarningOverlay(
@@ -949,21 +1040,43 @@ export function createEngine(canvas, callbacks = {}) {
     const code = inputMap[e.key]
     if (code) {
       e.preventDefault()
-      recordInput(code)
+      keys[e.key] = true
+      setReplayHeld(code, true)
+      return
     }
     keys[e.key] = true
   }
 
   function keyUp(e) {
     if (e.key === 'Control') {
-      recordInput('SC')
       keys[e.key] = false
+      setReplayHeld('SC', false)
       return
     }
     const code = inputMap[e.key]
-    if (code) recordInput(code)
-    if (e.key === ' ') jumpConsumed = false
+    if (code) {
+      keys[e.key] = false
+      setReplayHeld(code, false)
+      if (e.key === ' ') jumpConsumed = false
+      return
+    }
     keys[e.key] = false
+  }
+
+  function setReplayHeld(code, down) {
+    if (down) {
+      if (!replayHeld[code]) {
+        replayHeld[code] = true
+        recordInput(code)
+      }
+      return
+    }
+
+    const stillHeld = (replayCodeKeys[code] || []).some((key) => keys[key])
+    if (!stillHeld && replayHeld[code]) {
+      replayHeld[code] = false
+      recordInput(code)
+    }
   }
 
   // ─────────────────────────────────── start / stop ───
@@ -998,6 +1111,7 @@ export function createEngine(canvas, callbacks = {}) {
     currentMap = mapPast
     lastCP = null
     replay = []
+    replayHeld = {}
     replayPhysicsFrames = 0
     frameBoundaryMs = []
     frameStepMs = []
