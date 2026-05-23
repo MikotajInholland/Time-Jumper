@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: 5173,
+      allowedHosts: true, // <-- Added this here to allow Ngrok URLs
       watch: {
         usePolling: true,
       },
